@@ -14,12 +14,79 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  sortField: {
+    type: String,
+    default: '',
+  },
+  sortDirection: {
+    type: String,
+    default: 'asc',
+  },
 });
+
+const emit = defineEmits(['sort-change', 'row-click'])
+
+// Get nested object value
+function getNestedValue(obj, path) {
+  return path.split('.').reduce((current, key) => current?.[key], obj)
+}
+
+// Handle column sort
+const handleSort = (column) => {
+  if (!column.sortable) return
+
+  const field = column.accessorKey || column.key
+  let direction = 'asc'
+
+  if (props.sortField === field) {
+    direction = props.sortDirection === 'asc' ? 'desc' : 'asc'
+  }
+
+  emit('sort-change', { field, direction })
+}
+
+// Get sort icon
+const getSortIcon = (column) => {
+  const field = column.accessorKey || column.key
+
+  if (props.sortField !== field) {
+    return 'i-lucide-arrow-up-down'
+  }
+
+  return props.sortDirection === 'asc'
+    ? 'i-lucide-arrow-up'
+    : 'i-lucide-arrow-down'
+}
+
+const sortedData = computed(() => {
+  if (!props.sortField || !props.coins.length) {
+    return props.coins
+  }
+
+  return [...props.coins].sort((a, b) => {
+    const aValue = getNestedValue(a, props.sortField)
+    const bValue = getNestedValue(b, props.sortField)
+
+    // Handle different types
+    if (typeof aValue === 'string' && typeof bValue === 'string') {
+      return props.sortDirection === 'asc'
+        ? aValue.localeCompare(bValue)
+        : bValue.localeCompare(aValue)
+    }
+
+    if (typeof aValue === 'number' && typeof bValue === 'number') {
+      return props.sortDirection === 'asc' ? aValue - bValue : bValue - aValue
+    }
+
+    return 0
+  })
+})
 
 const columns = [
   {
     accessorKey: "market_cap_rank",
     header: "#",
+    sortable: true,
     cell: ({ row }) =>
       h(
         "span",
@@ -36,6 +103,7 @@ const columns = [
   {
     accessorKey: "name",
     header: "نام دارایی",
+    sortable: true,
     cell: ({ row }) => {
       return h("div", { class: "flex items-center gap-3" }, [
         h(UAvatar, {
@@ -64,6 +132,7 @@ const columns = [
   {
     accessorKey: "current_price",
     header: "قیمت فعلی",
+    sortable: true,
     cell: ({ row }) => {
       return h(
         "span",
@@ -84,6 +153,7 @@ const columns = [
   {
     accessorKey: "price_change_percentage_24h",
     header: "تغییر 24h",
+    sortable: true,
     cell: ({ row }) => {
       const change = row.getValue("price_change_percentage_24h");
       const color = change >= 0 ? "success" : "error";
@@ -120,7 +190,7 @@ const columns = [
           class:
             "text-green-400 hover:text-green-300 hover:bg-green-500/10 transition-all duration-200",
           onClick: () => {
-            navigateTo(`/coins/${row.original.id}`);
+            emit('row-click', row.original);
           },
         })
       );
@@ -136,36 +206,85 @@ const columns = [
 </script>
 
 <template>
-  <div
-    class="rounded-xl overflow-hidden border border-green-500/20 bg-gray-900/50 backdrop-blur-sm"
-  >
-    <UTable
-      :data="coins"
-      :columns="columns"
-      :loading="loading"
-      :loading-state="{
-        icon: 'i-lucide-loader-circle',
-        label: 'در حال بارگذاری...',
-      }"
-      :empty-state="{ icon: 'i-lucide-database', label: 'داده‌ای یافت نشد' }"
-      :ui="{
-        base: 'min-w-full table-fixed',
-        thead:
-          'bg-gradient-to-r from-gray-800/80 to-gray-800/50 border-b-2 border-green-500/30',
-        tbody: 'divide-y divide-green-500/10',
-        tr: 'hover:bg-green-500/5 transition-all duration-200',
-        th: 'px-4 py-4 text-sm font-bold text-green-400 uppercase tracking-wider whitespace-nowrap',
-        td: 'px-4 py-4 text-sm align-middle',
-        loadingState: {
-          icon: 'animate-spin text-green-400',
-          label: 'text-gray-400',
-        },
-        emptyState: {
-          icon: 'text-gray-500',
-          label: 'text-gray-400',
-        },
-      }"
-    />
+  <div class="rounded-xl overflow-hidden border border-green-500/20 bg-gray-900/50 backdrop-blur-sm">
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-green-500/10">
+        <!-- Table Header -->
+        <thead :class="'bg-gradient-to-r from-gray-800/80 to-gray-800/50 border-b-2 border-green-500/30'">
+          <tr>
+            <th
+              v-for="column in columns"
+              :key="column.accessorKey || column.id"
+              scope="col"
+              :class="[
+                'px-4 py-4 text-sm font-bold text-green-400 uppercase tracking-wider whitespace-nowrap',
+                column.meta?.class?.th,
+                { 'cursor-pointer hover:bg-gray-700/50': column.sortable }
+              ]"
+              @click="handleSort(column)"
+            >
+              <div class="flex items-center gap-2">
+                <span>{{ column.header }}</span>
+                <UIcon
+                  v-if="column.sortable"
+                  :name="getSortIcon(column)"
+                  class="size-4 text-green-400"
+                />
+              </div>
+            </th>
+          </tr>
+        </thead>
+
+        <!-- Table Body -->
+        <tbody :class="'divide-y divide-green-500/10'">
+          <!-- Loading State -->
+          <tr v-if="loading">
+            <td
+              :colspan="columns.length"
+              class="px-4 py-8 text-center"
+            >
+              <div class="flex items-center justify-center gap-3">
+                <UIcon name="i-lucide-loader-circle" class="size-6 animate-spin text-green-400" />
+                <span class="text-gray-400">در حال بارگذاری...</span>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Empty State -->
+          <tr v-else-if="!sortedData.length">
+            <td
+              :colspan="columns.length"
+              class="px-4 py-8 text-center"
+            >
+              <div class="flex items-center justify-center gap-3">
+                <UIcon name="i-lucide-database" class="size-6 text-gray-500" />
+                <span class="text-gray-400">داده‌ای یافت نشد</span>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Data Rows -->
+          <tr v-else v-for="(row, index) in sortedData" :key="row.id || index" class="hover:bg-green-500/5 transition-all duration-200">
+            <td
+              v-for="column in columns"
+              :key="column.accessorKey || column.id"
+              :class="[
+                'px-4 py-4 text-sm align-middle',
+                column.meta?.class?.td
+              ]"
+            >
+              <component
+                v-if="typeof column.cell === 'function'"
+                :is="column.cell({ row: { original: row, index, getValue: (key) => getNestedValue(row, key) } })"
+              />
+              <span v-else :class="'text-gray-100'">
+                {{ getNestedValue(row, column.accessorKey) || '-' }}
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
 
